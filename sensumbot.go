@@ -6,20 +6,23 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/sonyarouje/simdb/db"
 )
 
-const TOKEN = "SECRET"
-const BOT_ID = "SECRET"
-const START_COMMAND = "/start@sensum_bot"
-const CHAT_IDS_FILE = "./sensumbot_chat_ids"
-const SENSUM_URL = "https://sensum-server.herokuapp.com/api/sensations/letThemFlow"
-const POLL_TICK = 5
+type Configuration struct {
+	BotToken     string
+	StartCommand string
+	SensumUrl    string
+	PollTick     time.Duration
+}
 
 var lastPostedSensationId = ""
+
+var configs = loadConfigs()
 
 type Sensation struct {
 	ID        string
@@ -40,9 +43,22 @@ func (r Receiver) ID() (jsonField string, value interface{}) {
 	return
 }
 
+func loadConfigs() Configuration {
+	file, _ := os.Open("config.json")
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	configuration := Configuration{}
+	err := decoder.Decode(&configuration)
+	if err != nil {
+		log.Fatalln("error:", err)
+	}
+	log.Println(configuration.BotToken)
+	return configuration
+}
+
 func getLastSensation() Sensation {
 	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": 1})
-	req, err := http.NewRequest("POST", SENSUM_URL, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", configs.SensumUrl, bytes.NewBuffer(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
@@ -62,7 +78,7 @@ func getLastSensation() Sensation {
 }
 
 func sensumPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
-	c := time.Tick(POLL_TICK * time.Second)
+	c := time.Tick(configs.PollTick * time.Second)
 	for range c {
 		log.Println("Checking")
 		lastSensation := getLastSensation()
@@ -88,7 +104,7 @@ func telegramPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
 	updates, _ := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil || update.Message.Text != START_COMMAND {
+		if update.Message == nil || update.Message.Text != configs.StartCommand {
 			continue
 		}
 		dbDriver.Insert(Receiver{ChatID: update.Message.Chat.ID})
@@ -99,7 +115,7 @@ func telegramPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
 }
 
 func main() {
-	bot, err := tgbotapi.NewBotAPI(TOKEN)
+	bot, err := tgbotapi.NewBotAPI(configs.BotToken)
 	if err != nil {
 		log.Panic(err)
 	}
