@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -14,10 +15,11 @@ import (
 )
 
 type Configuration struct {
-	BotToken     string
-	StartCommand string
-	SensumUrl    string
-	PollTick     time.Duration
+	BotToken                string
+	StartCommand            string
+	SensumUrl               string
+	PollTick                time.Duration
+	TrackedSensationsLength int
 }
 
 var lastPostedSensationId = ""
@@ -25,16 +27,28 @@ var lastPostedSensationId = ""
 var configs = loadConfigs()
 
 type Sensation struct {
-	ID        string
-	Author    string
-	Message   string
-	Likes     int
-	Dislikes  int
-	Timestamp time.Time
+	SensumID  string    `json:"id"`
+	Author    string    `json:"author"`
+	Message   string    `json:"message"`
+	Likes     int       `json:"likes"`
+	Dislikes  int       `json:"dislikes"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+func (s Sensation) ID() (jsonField string, value interface{}) {
+	value = s.SensumID
+	jsonField = "id"
+	return
+}
+
+type TrackedSensation struct {
+	SensationID string
+	MessageID   int
 }
 
 type Receiver struct {
-	ChatID int64
+	ChatID            int64              `json:"chatId"`
+	TrackedSensations []TrackedSensation `json:"trackedSensations"`
 }
 
 func (r Receiver) ID() (jsonField string, value interface{}) {
@@ -50,14 +64,13 @@ func loadConfigs() Configuration {
 	configuration := Configuration{}
 	err := decoder.Decode(&configuration)
 	if err != nil {
-		log.Fatalln("error:", err)
+		log.Fatalln(err)
 	}
-	log.Println(configuration.BotToken)
 	return configuration
 }
 
-func getLastSensation() Sensation {
-	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": 1})
+func getSensations() ([]Sensation, error) {
+	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": configs.TrackedSensationsLength})
 	req, err := http.NewRequest("POST", configs.SensumUrl, bytes.NewBuffer(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -65,6 +78,7 @@ func getLastSensation() Sensation {
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatalln(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
@@ -73,26 +87,99 @@ func getLastSensation() Sensation {
 	json.Unmarshal(body, &sensations)
 	if err != nil {
 		log.Fatalln(err)
+		return nil, err
 	}
-	return sensations[0]
+	return sensations, nil
+}
+
+func isDBEmpty(dbDriver *db.Driver) bool {
+	rawSensations := dbDriver.Open(Sensation{}).Raw().([]interface{})
+	return len(rawSensations) == 0
+}
+
+func getUpdatedSensations(newSensations []Sensation, dbDriver *db.Driver) ([]Sensation, error) {
+	var updatedSensations []Sensation
+	var currentSensation Sensation
+	var err error
+
+	if isDBEmpty(dbDriver) {
+		return newSensations, nil
+	}
+	for _, newSensation := range newSensations {
+		err = dbDriver.Open(Sensation{}).Where("id", "=", newSensation.SensumID).First().AsEntity(&currentSensation)
+		if err != nil {
+			log.Panicln(err)
+			return nil, err
+		}
+		if currentSensation.Likes != newSensation.Likes || currentSensation.Dislikes != newSensation.Dislikes {
+			updatedSensations = append(updatedSensations, newSensation)
+		}
+	}
+
+	return updatedSensations, nil
+}
+
+func insertNewSensations(newSensations []Sensation, dbDriver *db.Driver) error {
+	for _, sensation := range newSensations {
+		if err := dbDriver.Insert(sensation); err != nil {
+			log.Panicln(err)
+			return err
+		}
+	}
+	return nil
+}
+
+func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
+	for _, trackedSensation := range trackedSensations {
+		if trackedSensation.SensationID == sensationId {
+			return trackedSensation.MessageID
+		}
+	}
+	return 0
 }
 
 func sensumPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
 	c := time.Tick(configs.PollTick * time.Second)
 	for range c {
 		log.Println("Checking")
-		lastSensation := getLastSensation()
-		if lastSensation.ID != lastPostedSensationId {
-			lastPostedSensationId = lastSensation.ID
-			log.Println(lastSensation.Message)
+		newSensations, err := getSensations()
+		if err != nil {
+			continue
+		}
+		updatedSensations, err := getUpdatedSensations(newSensations, dbDriver)
+		if err != nil {
+			continue
+		}
+		if insertNewSensations(updatedSensations, dbDriver) != nil {
+			continue
+		}
+		var receivers []Receiver
+		dbDriver.Open(Receiver{}).Get().AsEntity(&receivers)
 
-			var receivers []Receiver
-			dbDriver.Open(Receiver{}).Get().AsEntity(&receivers)
-
-			for _, receiver := range receivers {
-				msg := tgbotapi.NewMessage(receiver.ChatID, lastSensation.Message+"\n~ "+lastSensation.Author)
-				bot.Send(msg)
+		for _, receiver := range receivers {
+			for _, sensation := range updatedSensations {
+				messageText := sensation.Message + "\n~ " + sensation.Author + "\n -" + strconv.Itoa(sensation.Dislikes) + " +" + strconv.Itoa(sensation.Likes)
+				messageID := findMessage(receiver.TrackedSensations, sensation.SensumID)
+				if messageID > 0 {
+					edit := tgbotapi.EditMessageTextConfig{
+						BaseEdit: tgbotapi.BaseEdit{
+							ChatID:    receiver.ChatID,
+							MessageID: messageID,
+						},
+						Text: messageText,
+					}
+					_, err = bot.Send(edit)
+				} else {
+					msg := tgbotapi.NewMessage(receiver.ChatID, messageText)
+					messageSent, err := bot.Send(msg)
+					if err != nil {
+						continue
+					}
+					receiver.TrackedSensations = append(receiver.TrackedSensations, TrackedSensation{SensationID: sensation.SensumID, MessageID: messageSent.MessageID})
+				}
 			}
+			// FIXME: This is broken
+			dbDriver.Insert(receiver)
 		}
 	}
 }
