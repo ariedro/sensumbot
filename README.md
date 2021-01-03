@@ -15,7 +15,7 @@ Telegram Bot for fetching the last messages from the famous app [Sensum](https:/
 - [x] Add a config file
 - [x] Implement sensations votes counter and update them in the sent messages
 - [x] Modularize components into different files
-- [ ] Add version release endpoint
+- [x] Add version release endpoint
 - [ ] Complete this README
 - [ ] Publish the repo
 

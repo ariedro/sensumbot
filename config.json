@@ -1,6 +1,9 @@
 {
   "BotToken": "[Insert your bot's token here]",
-  "StartCommand": "/start@[Insert your bot name here]",
+  "Commands": {
+    "Start": "/start@[Insert your bot name here]",
+    "Version": "/version@[Insert your bot name here]"
+  },
   "SensumUrl": "[Sensum's sensations endpoint]",
   "PollTick": 5,
   "TrackedSensationsLength": 10

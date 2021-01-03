@@ -18,13 +18,19 @@ func telegramPoll(bot *tgbotapi.BotAPI) {
 	updates, _ := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil || update.Message.Text != Configs.StartCommand {
+		if update.Message == nil {
 			continue
 		}
-		addNewReceiver(Receiver{ChatID: update.Message.Chat.ID})
+		switch update.Message.Text {
+		case Configs.Commands.Start:
+			addNewReceiver(Receiver{ChatID: update.Message.Chat.ID})
+			bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Agrega2"))
+		case Configs.Commands.Version:
+			bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, GetVersion()))
+		default:
+			continue
+		}
 
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Agrega2")
-		bot.Send(msg)
 	}
 }
 

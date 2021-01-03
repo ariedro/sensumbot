@@ -8,8 +8,12 @@ import (
 )
 
 type Configuration struct {
-	BotToken                string
-	StartCommand            string
+	BotToken     string
+	StartCommand string
+	Commands     struct {
+		Start   string
+		Version string
+	}
 	SensumUrl               string
 	PollTick                time.Duration
 	TrackedSensationsLength int
