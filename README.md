@@ -4,11 +4,23 @@ Telegram Bot for fetching the last messages from the famous app [Sensum](https:/
 
 ## Install
 
-// TODO
+1. Set up the bot token and other variables in `config.json`
+
+2. Set up the `$GOPATH` and such 
+
+3. Build the executable
+
+    ``` sh
+    $ go build src/*
+    ```
 
 ## Run
 
-// TODO
+Simply run the executable
+
+``` sh
+$ ./bot
+```
 
 ## To Do
 
@@ -16,8 +28,7 @@ Telegram Bot for fetching the last messages from the famous app [Sensum](https:/
 - [x] Implement sensations votes counter and update them in the sent messages
 - [x] Modularize components into different files
 - [x] Add version release endpoint
-- [ ] Complete this README
-- [ ] Publish the repo
+- [x] Publish the repo
 
 ## Author
 
