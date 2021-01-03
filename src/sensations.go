@@ -6,22 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
-
-type Configuration struct {
-	BotToken                string
-	StartCommand            string
-	SensumUrl               string
-	PollTick                time.Duration
-	TrackedSensationsLength int
-}
-
-var Configs = loadConfigs()
 
 type Sensation struct {
 	SensumID  string    `json:"id"`
@@ -40,18 +28,6 @@ type TrackedSensation struct {
 type Receiver struct {
 	ChatID            int64
 	TrackedSensations []TrackedSensation
-}
-
-func loadConfigs() Configuration {
-	file, _ := os.Open("config.json")
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	configuration := Configuration{}
-	err := decoder.Decode(&configuration)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return configuration
 }
 
 func getSensations() ([]Sensation, error) {
@@ -102,12 +78,6 @@ func filterUnalteredSensations(sensations []Sensation) ([]Sensation, error) {
 	return updatedSensations, nil
 }
 
-func addSensationsToCache(sensations []Sensation) {
-	for _, sensation := range sensations {
-		UpdateSensationsCache(sensation)
-	}
-}
-
 func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
 	for _, trackedSensation := range trackedSensations {
 		if trackedSensation.SensationID == sensationId {
@@ -117,7 +87,32 @@ func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
 	return 0
 }
 
-func sensumPoll(bot *tgbotapi.BotAPI) {
+func TrackSensation(receiverIndex int, sensation Sensation, message tgbotapi.Message) {
+	CachedReceivers[receiverIndex].TrackedSensations = append(CachedReceivers[receiverIndex].TrackedSensations, TrackedSensation{SensationID: sensation.SensumID, MessageID: message.MessageID})
+}
+
+func updateSensationsCache(sensations []Sensation) {
+	for _, sensation := range sensations {
+		for i := range CachedSensations {
+			if CachedSensations[i].SensumID == sensation.SensumID {
+				CachedSensations[i] = sensation
+				return
+			}
+		}
+		CachedSensations = append(CachedSensations, sensation)
+		if len(CachedSensations) > Configs.TrackedSensationsLength {
+			popOldestSensation()
+		}
+	}
+}
+
+func popOldestSensation() {
+	if len(CachedSensations) > 0 {
+		CachedSensations = CachedSensations[1:]
+	}
+}
+
+func SensumPoll(bot *tgbotapi.BotAPI) {
 	c := time.Tick(Configs.PollTick * time.Second)
 	for range c {
 		log.Println("Checking")
@@ -132,64 +127,16 @@ func sensumPoll(bot *tgbotapi.BotAPI) {
 			continue
 		}
 		// Update the cache
-		addSensationsToCache(sensations)
+		updateSensationsCache(sensations)
 
 		for receiverIndex, receiver := range CachedReceivers {
 			for _, sensation := range sensations {
-				messageText := sensation.Message + "\n~ " + sensation.Author + "\n -" + strconv.Itoa(sensation.Dislikes) + " +" + strconv.Itoa(sensation.Likes)
-				messageID := findMessage(receiver.TrackedSensations, sensation.SensumID)
-				// Post or edit?
-				if messageID > 0 {
-					edit := tgbotapi.EditMessageTextConfig{
-						BaseEdit: tgbotapi.BaseEdit{
-							ChatID:    receiver.ChatID,
-							MessageID: messageID,
-						},
-						Text: messageText,
-					}
-					_, err = bot.Send(edit)
-				} else {
-					msg := tgbotapi.NewMessage(receiver.ChatID, messageText)
-					messageSent, err := bot.Send(msg)
-					if err != nil {
-						continue
-					}
-					TrackSensation(receiverIndex, sensation, messageSent)
+	 			err := SendMessage(sensation, receiver, receiverIndex, bot)
+				if err != nil {
+					continue
 				}
 			}
-			SaveData()
-		}
-		log.Println(CachedReceivers)
+	 	}
+	 	SaveData()
 	}
-}
-
-func telegramPoll(bot *tgbotapi.BotAPI) {
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	updates, _ := bot.GetUpdatesChan(u)
-
-	for update := range updates {
-		if update.Message == nil || update.Message.Text != Configs.StartCommand {
-			continue
-		}
-		AddNewReceiver(Receiver{ChatID: update.Message.Chat.ID})
-
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Agrega2")
-		bot.Send(msg)
-	}
-}
-
-func main() {
-	LoadData()
-	bot, err := tgbotapi.NewBotAPI(Configs.BotToken)
-	if err != nil {
-		log.Panic(err)
-		panic(err)
-	}
-
-	log.Println("Bot started")
-
-	go telegramPoll(bot)
-	sensumPoll(bot)
 }
