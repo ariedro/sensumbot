@@ -15,7 +15,7 @@ func LoadData() {
 	var sensationsData []Sensation
 	var receiversData []Receiver
 
-	dataFile, err := os.Open(FILE_PATH)
+	dataFile, err := os.OpenFile(FILE_PATH, os.O_RDONLY|os.O_CREATE, 0666)
 
 	if err != nil {
 		log.Fatal(err)
