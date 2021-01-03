@@ -56,6 +56,7 @@ func SendMessage(sensation Sensation, receiver Receiver, receiverIndex int, bot 
 		if err != nil {
 			return err
 		}
+		// TODO: This shouldn't be here
 		TrackSensation(receiverIndex, sensation, messageSent)
 	}
 	return nil

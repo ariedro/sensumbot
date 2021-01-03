@@ -57,19 +57,22 @@ func filterUnalteredSensations(sensations []Sensation) ([]Sensation, error) {
 	var updatedSensations []Sensation
 	var newSensation bool
 
-	if len(CachedSensations) == 0 {
-		return sensations, nil
-	}
 	for _, sensation := range sensations {
+		// Don't care about sensations that happened before bot init
+		if sensation.Timestamp.Before(UpTime) {
+			continue
+		}
 		newSensation = true
 		for _, cachedSensation := range CachedSensations {
 			if cachedSensation.SensumID == sensation.SensumID {
 				newSensation = false
+				// If sensation is cahed, only care if the like or dislike numbers changed
 				if cachedSensation.Likes != sensation.Likes || cachedSensation.Dislikes != sensation.Dislikes {
 					updatedSensations = append(updatedSensations, sensation)
 				}
 			}
 		}
+		// Always include new sensations
 		if newSensation {
 			updatedSensations = append(updatedSensations, sensation)
 		}
@@ -131,12 +134,12 @@ func SensumPoll(bot *tgbotapi.BotAPI) {
 
 		for receiverIndex, receiver := range CachedReceivers {
 			for _, sensation := range sensations {
-	 			err := SendMessage(sensation, receiver, receiverIndex, bot)
+				err := SendMessage(sensation, receiver, receiverIndex, bot)
 				if err != nil {
 					continue
 				}
 			}
-	 	}
-	 	SaveData()
+		}
+		SaveData()
 	}
 }

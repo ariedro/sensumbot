@@ -2,7 +2,10 @@ package main
 
 import (
 	"log"
+	"time"
 )
+
+var UpTime = time.Now()
 
 func main() {
 	LoadData()
