@@ -4,6 +4,8 @@ import (
 	"encoding/gob"
 	"log"
 	"os"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 const FILE_PATH = "data.bin"
@@ -36,11 +38,24 @@ func AddNewReceiver(receiver Receiver) {
 	CachedReceivers = append(CachedReceivers, receiver)
 }
 
-func PushNewSensation(sensation Sensation) {
-	CachedSensations = append(CachedSensations, sensation)
+func TrackSensation(receiverIndex int, sensation Sensation, message tgbotapi.Message) {
+	CachedReceivers[receiverIndex].TrackedSensations = append(CachedReceivers[receiverIndex].TrackedSensations, TrackedSensation{SensationID: sensation.SensumID, MessageID: message.MessageID})
 }
 
-func PopOldestSensation() {
+func UpdateSensationsCache(sensation Sensation) {
+	for i := range CachedSensations {
+		if CachedSensations[i].SensumID == sensation.SensumID {
+			CachedSensations[i] = sensation
+			return
+		}
+	}
+	CachedSensations = append(CachedSensations, sensation)
+	if len(CachedSensations) > Configs.TrackedSensationsLength {
+		popOldestSensation()
+	}
+}
+
+func popOldestSensation() {
 	if len(CachedSensations) > 0 {
 		CachedSensations = CachedSensations[1:]
 	}

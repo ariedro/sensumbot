@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"github.com/sonyarouje/simdb/db"
 )
 
 type Configuration struct {
@@ -22,9 +21,7 @@ type Configuration struct {
 	TrackedSensationsLength int
 }
 
-var lastPostedSensationId = ""
-
-var configs = loadConfigs()
+var Configs = loadConfigs()
 
 type Sensation struct {
 	SensumID  string    `json:"id"`
@@ -35,26 +32,14 @@ type Sensation struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func (s Sensation) ID() (jsonField string, value interface{}) {
-	value = s.SensumID
-	jsonField = "id"
-	return
-}
-
 type TrackedSensation struct {
 	SensationID string
 	MessageID   int
 }
 
 type Receiver struct {
-	ChatID            int64              `json:"chatId"`
-	TrackedSensations []TrackedSensation `json:"trackedSensations"`
-}
-
-func (r Receiver) ID() (jsonField string, value interface{}) {
-	value = r.ChatID
-	jsonField = "chatid"
-	return
+	ChatID            int64
+	TrackedSensations []TrackedSensation
 }
 
 func loadConfigs() Configuration {
@@ -70,8 +55,8 @@ func loadConfigs() Configuration {
 }
 
 func getSensations() ([]Sensation, error) {
-	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": configs.TrackedSensationsLength})
-	req, err := http.NewRequest("POST", configs.SensumUrl, bytes.NewBuffer(requestBody))
+	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": Configs.TrackedSensationsLength})
+	req, err := http.NewRequest("POST", Configs.SensumUrl, bytes.NewBuffer(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
@@ -92,41 +77,35 @@ func getSensations() ([]Sensation, error) {
 	return sensations, nil
 }
 
-func isDBEmpty(dbDriver *db.Driver) bool {
-	rawSensations := dbDriver.Open(Sensation{}).Raw().([]interface{})
-	return len(rawSensations) == 0
-}
-
-func getUpdatedSensations(newSensations []Sensation, dbDriver *db.Driver) ([]Sensation, error) {
+func filterUnalteredSensations(sensations []Sensation) ([]Sensation, error) {
 	var updatedSensations []Sensation
-	var currentSensation Sensation
-	var err error
+	var newSensation bool
 
-	if isDBEmpty(dbDriver) {
-		return newSensations, nil
+	if len(CachedSensations) == 0 {
+		return sensations, nil
 	}
-	for _, newSensation := range newSensations {
-		err = dbDriver.Open(Sensation{}).Where("id", "=", newSensation.SensumID).First().AsEntity(&currentSensation)
-		if err != nil {
-			log.Panicln(err)
-			return nil, err
+	for _, sensation := range sensations {
+		newSensation = true
+		for _, cachedSensation := range CachedSensations {
+			if cachedSensation.SensumID == sensation.SensumID {
+				newSensation = false
+				if cachedSensation.Likes != sensation.Likes || cachedSensation.Dislikes != sensation.Dislikes {
+					updatedSensations = append(updatedSensations, sensation)
+				}
+			}
 		}
-		if currentSensation.Likes != newSensation.Likes || currentSensation.Dislikes != newSensation.Dislikes {
-			updatedSensations = append(updatedSensations, newSensation)
+		if newSensation {
+			updatedSensations = append(updatedSensations, sensation)
 		}
 	}
 
 	return updatedSensations, nil
 }
 
-func insertNewSensations(newSensations []Sensation, dbDriver *db.Driver) error {
-	for _, sensation := range newSensations {
-		if err := dbDriver.Insert(sensation); err != nil {
-			log.Panicln(err)
-			return err
-		}
+func addSensationsToCache(sensations []Sensation) {
+	for _, sensation := range sensations {
+		UpdateSensationsCache(sensation)
 	}
-	return nil
 }
 
 func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
@@ -138,28 +117,28 @@ func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
 	return 0
 }
 
-func sensumPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
-	c := time.Tick(configs.PollTick * time.Second)
+func sensumPoll(bot *tgbotapi.BotAPI) {
+	c := time.Tick(Configs.PollTick * time.Second)
 	for range c {
 		log.Println("Checking")
-		newSensations, err := getSensations()
+		// Get new sensations
+		sensations, err := getSensations()
 		if err != nil {
 			continue
 		}
-		updatedSensations, err := getUpdatedSensations(newSensations, dbDriver)
+		// Filter the ones that didn't change
+		sensations, err = filterUnalteredSensations(sensations)
 		if err != nil {
 			continue
 		}
-		if insertNewSensations(updatedSensations, dbDriver) != nil {
-			continue
-		}
-		var receivers []Receiver
-		dbDriver.Open(Receiver{}).Get().AsEntity(&receivers)
+		// Update the cache
+		addSensationsToCache(sensations)
 
-		for _, receiver := range receivers {
-			for _, sensation := range updatedSensations {
+		for receiverIndex, receiver := range CachedReceivers {
+			for _, sensation := range sensations {
 				messageText := sensation.Message + "\n~ " + sensation.Author + "\n -" + strconv.Itoa(sensation.Dislikes) + " +" + strconv.Itoa(sensation.Likes)
 				messageID := findMessage(receiver.TrackedSensations, sensation.SensumID)
+				// Post or edit?
 				if messageID > 0 {
 					edit := tgbotapi.EditMessageTextConfig{
 						BaseEdit: tgbotapi.BaseEdit{
@@ -175,26 +154,26 @@ func sensumPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
 					if err != nil {
 						continue
 					}
-					receiver.TrackedSensations = append(receiver.TrackedSensations, TrackedSensation{SensationID: sensation.SensumID, MessageID: messageSent.MessageID})
+					TrackSensation(receiverIndex, sensation, messageSent)
 				}
 			}
-			// FIXME: This is broken
-			dbDriver.Insert(receiver)
+			SaveData()
 		}
+		log.Println(CachedReceivers)
 	}
 }
 
-func telegramPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
+func telegramPoll(bot *tgbotapi.BotAPI) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
 	updates, _ := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil || update.Message.Text != configs.StartCommand {
+		if update.Message == nil || update.Message.Text != Configs.StartCommand {
 			continue
 		}
-		dbDriver.Insert(Receiver{ChatID: update.Message.Chat.ID})
+		AddNewReceiver(Receiver{ChatID: update.Message.Chat.ID})
 
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Agrega2")
 		bot.Send(msg)
@@ -202,17 +181,15 @@ func telegramPoll(bot *tgbotapi.BotAPI, dbDriver *db.Driver) {
 }
 
 func main() {
-	bot, err := tgbotapi.NewBotAPI(configs.BotToken)
+	LoadData()
+	bot, err := tgbotapi.NewBotAPI(Configs.BotToken)
 	if err != nil {
 		log.Panic(err)
-	}
-	dbDriver, err := db.New("data")
-	if err != nil {
 		panic(err)
 	}
 
 	log.Println("Bot started")
 
-	go telegramPoll(bot, dbDriver)
-	sensumPoll(bot, dbDriver)
+	go telegramPoll(bot)
+	sensumPoll(bot)
 }
