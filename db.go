@@ -9,9 +9,11 @@ import (
 const FILE_PATH = "data.bin"
 
 var CachedSensations []Sensation
+var CachedReceivers []Receiver
 
 func LoadData() {
-	var data []Sensation
+	var sensationsData []Sensation
+	var receiversData []Receiver
 
 	dataFile, err := os.Open(FILE_PATH)
 
@@ -21,23 +23,24 @@ func LoadData() {
 	}
 
 	dataDecoder := gob.NewDecoder(dataFile)
-	err = dataDecoder.Decode(&data)
-
-	if err != nil {
-		log.Fatal(err)
-		panic(err)
-	}
+	dataDecoder.Decode(&sensationsData)
+	dataDecoder.Decode(&receiversData)
 
 	dataFile.Close()
 
-	CachedSensations = data
+	CachedSensations = sensationsData
+	CachedReceivers = receiversData
 }
 
-func PushNew(sensation Sensation) {
+func AddNewReceiver(receiver Receiver) {
+	CachedReceivers = append(CachedReceivers, receiver)
+}
+
+func PushNewSensation(sensation Sensation) {
 	CachedSensations = append(CachedSensations, sensation)
 }
 
-func PopOldest() {
+func PopOldestSensation() {
 	if len(CachedSensations) > 0 {
 		CachedSensations = CachedSensations[1:]
 	}
@@ -53,6 +56,7 @@ func SaveData() {
 
 	dataEncoder := gob.NewEncoder(dataFile)
 	dataEncoder.Encode(CachedSensations)
+	dataEncoder.Encode(CachedReceivers)
 
 	dataFile.Close()
 }
