@@ -34,8 +34,24 @@ func telegramPoll(bot *tgbotapi.BotAPI) {
 	}
 }
 
+func formatMessage(sensation Sensation) string {
+	message := sensation.Message
+
+	if IsTrending(sensation) {
+		message = "<b>" + message + "</b>"
+	}
+	if ShouldBeDenied(sensation) {
+		message = "<s>" + message + "</s>"
+	}
+
+	return message + "\n~ " +
+		sensation.Author + "\n -" +
+		strconv.Itoa(sensation.Dislikes) + " +" +
+		strconv.Itoa(sensation.Likes)
+}
+
 func SendMessage(sensation Sensation, receiver Receiver, receiverIndex int, bot *tgbotapi.BotAPI) error {
-	messageText := sensation.Message + "\n~ " + sensation.Author + "\n -" + strconv.Itoa(sensation.Dislikes) + " +" + strconv.Itoa(sensation.Likes)
+	messageText := formatMessage(sensation)
 	messageID := findMessage(receiver.TrackedSensations, sensation.SensumID)
 	// Post or edit?
 	if messageID > 0 {
@@ -44,7 +60,8 @@ func SendMessage(sensation Sensation, receiver Receiver, receiverIndex int, bot 
 				ChatID:    receiver.ChatID,
 				MessageID: messageID,
 			},
-			Text: messageText,
+			Text:      messageText,
+			ParseMode: "HTML",
 		}
 		_, err := bot.Send(edit)
 		if err != nil {
@@ -52,6 +69,7 @@ func SendMessage(sensation Sensation, receiver Receiver, receiverIndex int, bot 
 		}
 	} else {
 		msg := tgbotapi.NewMessage(receiver.ChatID, messageText)
+		msg.ParseMode = "HTML"
 		messageSent, err := bot.Send(msg)
 		if err != nil {
 			return err

@@ -115,6 +115,18 @@ func popOldestSensation() {
 	}
 }
 
+func IsTrending(sensation Sensation) bool {
+	dislikes := sensation.Dislikes
+	if sensation.Dislikes == 0 {
+		dislikes = 1
+	}
+	return sensation.Likes >= (dislikes * 5)
+}
+
+func ShouldBeDenied(sensation Sensation) bool {
+	return sensation.Dislikes > sensation.Likes
+}
+
 func SensumPoll(bot *tgbotapi.BotAPI) {
 	c := time.Tick(Configs.PollTick * time.Second)
 	for range c {
