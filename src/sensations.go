@@ -87,6 +87,10 @@ func SensumPoll(bot *tgbotapi.BotAPI) {
 	contract := setupContract()
 	c := time.Tick(Configs.PollTick * time.Second)
 	for range c {
+		if len(CachedReceivers) == 0 {
+			log.Println("Skipping, no receivers")
+			continue
+		}
 		log.Println("Checking")
 		// Get new sensations
 		sensations, err := getSensations(contract)
