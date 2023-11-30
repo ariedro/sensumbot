@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"math/big"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -23,14 +23,11 @@ type Receiver struct {
 func setupContract() *Contract {
 	ethClientUrl := Configs.EthClientUrl
 
-	fmt.Println(ethClientUrl)
-
 	client, err := ethclient.Dial(ethClientUrl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(Configs.SensumContractAddress)
 	contractAddress := common.HexToAddress(Configs.SensumContractAddress)
 	contract, err := NewContract(contractAddress, client)
 	if err != nil {
@@ -40,20 +37,35 @@ func setupContract() *Contract {
 	return contract
 }
 
+func updateIndex(newIndex int) {
+	CachedIndex = newIndex
+}
+
 func getSensations(contract *Contract) ([]Sensation, error) {
-	amount, err := contract.GetSensationsLength(nil) // TODO: Cache the last index sent
+	indexBigInt, err := contract.GetSensationsLength(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	contractSensation, err := contract.Sensations(nil, amount.Sub(amount, common.Big1)) // TODO: Bring all of them
-	if err != nil {
-		log.Fatalln(err)
-		return nil, err
-	}
-	var sensation Sensation = Sensation{Author: "fafa", Message: contractSensation.Message} // TODO: Get real author avatar
+	lastIndex := int(indexBigInt.Int64())
 
-	return []Sensation{sensation}, nil
+	var sensations []Sensation
+	start := CachedIndex
+
+	for i := start; i < lastIndex-1; i += 1 {
+		contractSensation, err := contract.Sensations(nil, big.NewInt(int64(i)))
+		if err != nil {
+			log.Fatal(err)
+		}
+		// TODO: Get real author avatar
+		sensation := Sensation{Author: "fafa", Message: contractSensation.Message}
+
+		sensations = append(sensations, sensation)
+	}
+
+	updateIndex(lastIndex)
+
+	return sensations, nil
 }
 
 func SensumPoll(bot *tgbotapi.BotAPI) {
