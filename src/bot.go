@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"strconv"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
@@ -15,7 +14,7 @@ func telegramPoll(bot *tgbotapi.BotAPI) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	updates := bot.GetUpdatesChan(u)
+	updates, _ := bot.GetUpdatesChan(u)
 
 	for update := range updates {
 		if update.Message == nil {
@@ -35,48 +34,18 @@ func telegramPoll(bot *tgbotapi.BotAPI) {
 }
 
 func formatMessage(sensation Sensation) string {
-	message := sensation.Message
-
-	if IsTrending(sensation) {
-		message = "<b>" + message + "</b>"
-	}
-	if ShouldBeDenied(sensation) {
-		message = "<s>" + message + "</s>"
-	}
-
-	return message + "\n~ " +
-		sensation.Author + "\n -" +
-		strconv.Itoa(sensation.Dislikes) + " +" +
-		strconv.Itoa(sensation.Likes)
+	return sensation.Message + "\n" + sensation.Author
 }
 
 func SendMessage(sensation Sensation, receiver Receiver, receiverIndex int, bot *tgbotapi.BotAPI) error {
 	messageText := formatMessage(sensation)
-	messageID := findMessage(receiver.TrackedSensations, sensation.SensumID)
-	// Post or edit?
-	if messageID > 0 {
-		edit := tgbotapi.EditMessageTextConfig{
-			BaseEdit: tgbotapi.BaseEdit{
-				ChatID:    receiver.ChatID,
-				MessageID: messageID,
-			},
-			Text:      messageText,
-			ParseMode: "HTML",
-		}
-		_, err := bot.Send(edit)
-		if err != nil {
-			return err
-		}
-	} else {
-		msg := tgbotapi.NewMessage(receiver.ChatID, messageText)
-		msg.ParseMode = "HTML"
-		messageSent, err := bot.Send(msg)
-		if err != nil {
-			return err
-		}
-		// TODO: This shouldn't be here
-		TrackSensation(receiverIndex, sensation, messageSent)
+	msg := tgbotapi.NewMessage(receiver.ChatID, messageText)
+	msg.ParseMode = "HTML"
+	_, err := bot.Send(msg)
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 

@@ -8,11 +8,9 @@ import (
 
 const FILE_PATH = "data.bin"
 
-var CachedSensations []Sensation
 var CachedReceivers []Receiver
 
 func LoadData() {
-	var sensationsData []Sensation
 	var receiversData []Receiver
 
 	dataFile, err := os.OpenFile(FILE_PATH, os.O_RDONLY|os.O_CREATE, 0666)
@@ -23,12 +21,10 @@ func LoadData() {
 	}
 
 	dataDecoder := gob.NewDecoder(dataFile)
-	dataDecoder.Decode(&sensationsData)
 	dataDecoder.Decode(&receiversData)
 
 	dataFile.Close()
 
-	CachedSensations = sensationsData
 	CachedReceivers = receiversData
 }
 
@@ -41,7 +37,6 @@ func SaveData() {
 	}
 
 	dataEncoder := gob.NewEncoder(dataFile)
-	dataEncoder.Encode(CachedSensations)
 	dataEncoder.Encode(CachedReceivers)
 
 	dataFile.Close()

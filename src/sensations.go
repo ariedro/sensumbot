@@ -1,148 +1,71 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io/ioutil"
+	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type Sensation struct {
-	SensumID  string    `json:"id"`
-	Author    string    `json:"author"`
-	Message   string    `json:"message"`
-	Likes     int       `json:"likes"`
-	Dislikes  int       `json:"dislikes"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-type TrackedSensation struct {
-	SensationID string
-	MessageID   int
+	Author  string
+	Message string
 }
 
 type Receiver struct {
-	ChatID            int64
-	TrackedSensations []TrackedSensation
+	ChatID int64
 }
 
-func getSensations() ([]Sensation, error) {
-	requestBody, err := json.Marshal(map[string]interface{}{"offset": 0, "limit": Configs.TrackedSensationsLength})
-	req, err := http.NewRequest("POST", Configs.SensumUrl, bytes.NewBuffer(requestBody))
-	req.Header.Set("Content-Type", "application/json")
+func setupContract() *Contract {
+	ethClientUrl := Configs.EthClientUrl
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	fmt.Println(ethClientUrl)
+
+	client, err := ethclient.Dial(ethClientUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(Configs.SensumContractAddress)
+	contractAddress := common.HexToAddress(Configs.SensumContractAddress)
+	contract, err := NewContract(contractAddress, client)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return contract
+}
+
+func getSensations(contract *Contract) ([]Sensation, error) {
+	amount, err := contract.GetSensationsLength(nil) // TODO: Cache the last index sent
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contractSensation, err := contract.Sensations(nil, amount.Sub(amount, common.Big1)) // TODO: Bring all of them
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	var sensation Sensation = Sensation{Author: "fafa", Message: contractSensation.Message} // TODO: Get real author avatar
 
-	var sensations []Sensation
-	json.Unmarshal(body, &sensations)
-	if err != nil {
-		log.Fatalln(err)
-		return nil, err
-	}
-	return sensations, nil
-}
-
-func filterUnalteredSensations(sensations []Sensation) ([]Sensation, error) {
-	var updatedSensations []Sensation
-	var newSensation bool
-
-	for _, sensation := range sensations {
-		// Don't care about sensations that happened before bot init
-		if sensation.Timestamp.Before(UpTime) {
-			continue
-		}
-		newSensation = true
-		for _, cachedSensation := range CachedSensations {
-			if cachedSensation.SensumID == sensation.SensumID {
-				newSensation = false
-				// If sensation is cahed, only care if the like or dislike numbers changed
-				if cachedSensation.Likes != sensation.Likes || cachedSensation.Dislikes != sensation.Dislikes {
-					updatedSensations = append(updatedSensations, sensation)
-				}
-			}
-		}
-		// Always include new sensations
-		if newSensation {
-			updatedSensations = append(updatedSensations, sensation)
-		}
-	}
-
-	return updatedSensations, nil
-}
-
-func findMessage(trackedSensations []TrackedSensation, sensationId string) int {
-	for _, trackedSensation := range trackedSensations {
-		if trackedSensation.SensationID == sensationId {
-			return trackedSensation.MessageID
-		}
-	}
-	return 0
-}
-
-func TrackSensation(receiverIndex int, sensation Sensation, message tgbotapi.Message) {
-	CachedReceivers[receiverIndex].TrackedSensations = append(CachedReceivers[receiverIndex].TrackedSensations, TrackedSensation{SensationID: sensation.SensumID, MessageID: message.MessageID})
-}
-
-func updateSensationsCache(sensations []Sensation) {
-	for _, sensation := range sensations {
-		for i := range CachedSensations {
-			if CachedSensations[i].SensumID == sensation.SensumID {
-				CachedSensations[i] = sensation
-				return
-			}
-		}
-		CachedSensations = append(CachedSensations, sensation)
-		if len(CachedSensations) > Configs.TrackedSensationsLength {
-			popOldestSensation()
-		}
-	}
-}
-
-func popOldestSensation() {
-	if len(CachedSensations) > 0 {
-		CachedSensations = CachedSensations[1:]
-	}
-}
-
-func IsTrending(sensation Sensation) bool {
-	dislikes := sensation.Dislikes
-	if sensation.Dislikes == 0 {
-		dislikes = 1
-	}
-	return sensation.Likes >= (dislikes * 5)
-}
-
-func ShouldBeDenied(sensation Sensation) bool {
-	return sensation.Dislikes > sensation.Likes
+	return []Sensation{sensation}, nil
 }
 
 func SensumPoll(bot *tgbotapi.BotAPI) {
+	contract := setupContract()
 	c := time.Tick(Configs.PollTick * time.Second)
 	for range c {
 		log.Println("Checking")
 		// Get new sensations
-		sensations, err := getSensations()
+		sensations, err := getSensations(contract)
 		if err != nil {
 			continue
 		}
-		// Filter the ones that didn't change
-		sensations, err = filterUnalteredSensations(sensations)
-		if err != nil {
-			continue
-		}
-		// Update the cache
-		updateSensationsCache(sensations)
 
 		for receiverIndex, receiver := range CachedReceivers {
 			for _, sensation := range sensations {

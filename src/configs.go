@@ -14,9 +14,9 @@ type Configuration struct {
 		Start   string
 		Version string
 	}
-	SensumUrl               string
-	PollTick                time.Duration
-	TrackedSensationsLength int
+	SensumContractAddress string
+	EthClientUrl          string
+	PollTick              time.Duration
 }
 
 var Configs = loadConfigs()
