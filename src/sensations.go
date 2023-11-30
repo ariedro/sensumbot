@@ -20,6 +20,12 @@ type Receiver struct {
 	ChatID int64
 }
 
+var AVATARS = []string{
+	"◕‿◕", "◪_◪", "°▽°", "◔_◔", "・ω・", "◣_◢", "⌐■_■", "◉_◉", "◔̯◔", "⌒_⌒",
+	"ʘ益ʘ", "ಥ_ಥ", "ಠ▃ಠ", "◡w◡", "▼ｪ▼", "ಠ_๏", "⚆_⚆", "ↁ_ↁ", "°□°", "Ф.Ф", "♥‿♥",
+	"╭ರ_⊙", "◡ᴥ◡", "￣Д￣", "●_●", "Ò‸Ó", "︶︿︶", "ಠ﹏ಠ", "◔︿◔", ".益.", "*‿*", "👽",
+}
+
 func setupContract() *Contract {
 	ethClientUrl := Configs.EthClientUrl
 
@@ -41,6 +47,13 @@ func updateIndex(newIndex int) {
 	CachedIndex = newIndex
 }
 
+func getAvatar(avatarIndex int) string {
+	if avatarIndex > len(AVATARS)-1 || avatarIndex < 0 {
+		return AVATARS[0]
+	}
+	return AVATARS[avatarIndex]
+}
+
 func getSensations(contract *Contract) ([]Sensation, error) {
 	indexBigInt, err := contract.GetSensationsLength(nil)
 	if err != nil {
@@ -52,13 +65,15 @@ func getSensations(contract *Contract) ([]Sensation, error) {
 	var sensations []Sensation
 	start := CachedIndex
 
-	for i := start; i < lastIndex-1; i += 1 {
+	for i := start; i < lastIndex; i += 1 {
 		contractSensation, err := contract.Sensations(nil, big.NewInt(int64(i)))
 		if err != nil {
 			log.Fatal(err)
 		}
-		// TODO: Get real author avatar
-		sensation := Sensation{Author: "fafa", Message: contractSensation.Message}
+		avatarIndexBigInt := contractSensation.Avatar
+		avatarIndex := int(avatarIndexBigInt.Int64())
+
+		sensation := Sensation{Author: getAvatar(avatarIndex), Message: contractSensation.Message}
 
 		sensations = append(sensations, sensation)
 	}
